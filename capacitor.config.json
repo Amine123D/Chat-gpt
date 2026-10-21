@@ -1,0 +1,9 @@
+{
+  "appId": "com.localplayer.videoplayer",
+  "appName": "Offline Video Player",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "ScreenOrientation": {"orientation": "PORTRAIT"}
+  }
+}
