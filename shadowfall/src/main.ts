@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { damage, need } from "./logic";
 
 type Save = { name:string; level:number; xp:number; hp:number; maxHp:number; atk:number; x:number; defeated:number[]; boss:boolean; checkpoint:boolean; inv:string[] };
 const KEY="shadowfall.save.v1";
@@ -23,8 +24,6 @@ const readSave=():Save|null=>{try{
   };
 }catch{return null}};
 const persist=(s:Save)=>{try{localStorage.setItem(KEY,JSON.stringify(s))}catch{}};
-const damage=(base:number,def=0,crit=false)=>Math.max(1,Math.floor(Math.max(1,base-Math.max(0,def))*(crit?1.6:1)));
-const need=(lv:number)=>40+Math.max(1,lv)*25;
 
 class Shadowfall extends Phaser.Scene {
   player!:Phaser.Physics.Arcade.Sprite; save= fresh(); cursors!:Phaser.Types.Input.Keyboard.CursorKeys;
