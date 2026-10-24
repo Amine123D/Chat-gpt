@@ -1,0 +1,24 @@
+name: Shadowfall CI
+on:
+  push:
+    paths:
+      - "shadowfall/**"
+      - ".github/workflows/shadowfall-ci.yml"
+  pull_request:
+    paths:
+      - "shadowfall/**"
+      - ".github/workflows/shadowfall-ci.yml"
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: shadowfall
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run build
