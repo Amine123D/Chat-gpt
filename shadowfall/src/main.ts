@@ -3,7 +3,25 @@ import Phaser from "phaser";
 type Save = { name:string; level:number; xp:number; hp:number; maxHp:number; atk:number; x:number; defeated:number[]; boss:boolean; checkpoint:boolean; inv:string[] };
 const KEY="shadowfall.save.v1";
 const fresh=(name="Wayfarer"):Save=>({name:name.slice(0,18)||"Wayfarer",level:1,xp:0,hp:100,maxHp:100,atk:10,x:90,defeated:[],boss:false,checkpoint:false,inv:["Rustbound Blade"]});
-const readSave=():Save|null=>{try{const x=JSON.parse(localStorage.getItem(KEY)||"null");return x&&typeof x.name==="string"&&Number.isFinite(x.level)&&Array.isArray(x.defeated)?x:null}catch{return null}};
+const readSave=():Save|null=>{try{
+  const raw=localStorage.getItem(KEY); if(!raw)return null;
+  const x=JSON.parse(raw) as Partial<Save>;
+  if(!x||typeof x!=="object"||typeof x.name!=="string"||!Number.isFinite(x.level)||!Array.isArray(x.defeated))return null;
+  const d=fresh(x.name);
+  return {
+    ...d,...x,
+    name:x.name.slice(0,18)||"Wayfarer",
+    level:Math.max(1,Math.floor(Number(x.level)||1)),
+    xp:Math.max(0,Number(x.xp)||0),
+    hp:Math.max(1,Number(x.hp)||d.hp),
+    maxHp:Math.max(1,Number(x.maxHp)||d.maxHp),
+    atk:Math.max(1,Number(x.atk)||d.atk),
+    x:Math.max(40,Math.min(2550,Number(x.x)||d.x)),
+    defeated:x.defeated.filter((n):n is number=>Number.isInteger(n)&&n>=0),
+    boss:Boolean(x.boss),checkpoint:Boolean(x.checkpoint),
+    inv:Array.isArray(x.inv)?x.inv.filter((v):v is string=>typeof v==="string").slice(0,100):d.inv
+  };
+}catch{return null}};
 const persist=(s:Save)=>{try{localStorage.setItem(KEY,JSON.stringify(s))}catch{}};
 const damage=(base:number,def=0,crit=false)=>Math.max(1,Math.floor(Math.max(1,base-Math.max(0,def))*(crit?1.6:1)));
 const need=(lv:number)=>40+Math.max(1,lv)*25;
@@ -11,7 +29,7 @@ const need=(lv:number)=>40+Math.max(1,lv)*25;
 class Shadowfall extends Phaser.Scene {
   player!:Phaser.Physics.Arcade.Sprite; save= fresh(); cursors!:Phaser.Types.Input.Keyboard.CursorKeys;
   keys!:Record<string,Phaser.Input.Keyboard.Key>; ground!:Phaser.Physics.Arcade.StaticGroup;
-  foes:{s:Phaser.Physics.Arcade.Sprite;hp:number;max:number;kind:number;next:number;boss?:boolean}[]=[];
+  foes:{s:Phaser.Physics.Arcade.Sprite;hp:number;max:number;kind:number;next:number;id:number;boss?:boolean}[]=[];
   loot:{o:Phaser.GameObjects.Rectangle;name:string;atk:number}[]=[];
   ui!:Phaser.GameObjects.Text; message!:Phaser.GameObjects.Text; paused=false; lastJump=false; nextHit=0; invuln=0; bossSpawned=false;
   touch={left:false,right:false,jump:false,attack:false,k:false,l:false,i:false,dodge:false,interact:false};
@@ -57,7 +75,7 @@ class Shadowfall extends Phaser.Scene {
     const stats=[{hp:30,speed:54,dmg:7,xp:16,color:0x8b7c9c},{hp:22,speed:92,dmg:9,xp:20,color:0x6ee7b7},{hp:65,speed:35,dmg:13,xp:32,color:0xfb923c},{hp:260,speed:48,dmg:14,xp:150,color:0xc084fc}][k]!;
     const s=this.physics.add.sprite(x,420,"foe").setTint(stats.color).setDepth(4);if(boss)s.setScale(2.1);
     s.setSize(boss?44:24,boss?62:30).setCollideWorldBounds(true).setMaxVelocity(180,700);this.physics.add.collider(s,this.ground);
-    this.foes.push({s,hp:stats.hp,max:stats.hp,kind:k,next:0,boss});
+    this.foes.push({s,hp:stats.hp,max:stats.hp,kind:k,next:0,id,boss});
   }
   update(t:number){
     if(this.paused||!this.player?.active)return;
@@ -89,7 +107,7 @@ class Shadowfall extends Phaser.Scene {
   }
   hit(e:typeof this.foes[number],raw:number,kb:number){const crit=Math.random()<.12,d=damage(raw,0,crit);e.hp-=d;e.s.setVelocityX(kb);e.s.setVelocityY(-75);e.s.setTint(0xffffff);this.time.delayedCall(90,()=>e.s.active&&e.s.clearTint());
     const txt=this.add.text(e.s.x,e.s.y-25,`${crit?"✦ ":""}${d}`,{fontFamily:"monospace",fontSize:"15px",color:crit?"#facc15":"#fff",stroke:"#211a34",strokeThickness:3}).setDepth(20);this.tweens.add({targets:txt,y:txt.y-25,alpha:0,duration:600,onComplete:()=>txt.destroy()});
-    if(e.hp<=0){e.s.disableBody(true,true);if(e.boss){this.save.boss=true;this.say("ASHEN WARDEN DEFEATED — THE SEAL STIRS",3500)}const xp=e.boss?150:[16,20,32][e.kind]!;this.save.defeated.push(e.boss?99:this.foes.indexOf(e));this.save.xp+=xp;
+    if(e.hp<=0){e.s.disableBody(true,true);if(e.boss){this.save.boss=true;this.say("ASHEN WARDEN DEFEATED — THE SEAL STIRS",3500)}const xp=e.boss?150:[16,20,32][e.kind]!;if(!this.save.defeated.includes(e.boss?99:e.id))this.save.defeated.push(e.boss?99:e.id);this.save.xp+=xp;
       while(this.save.xp>=need(this.save.level)){this.save.xp-=need(this.save.level);this.save.level++;this.save.maxHp+=12;this.save.atk+=2;this.save.hp=this.save.maxHp;this.say(`LEVEL UP! ${this.save.level} — +12 HP, +2 ATK`,2400)}
       const names=["Frontier Edge","Ashen Mail","Warden Cleaver","Emberglass Charm","Starbreaker"];const name=names[Math.floor(Math.random()*names.length)]!;const o=this.add.rectangle(e.s.x,e.s.y-12,14,14,[0x86efac,0x60a5fa,0xc084fc,0xfacc15,0xc084fc][Math.floor(Math.random()*5)]!).setDepth(10);this.loot.push({o,name,atk:2+Math.floor(Math.random()*8)});persist(this.save)
     }
@@ -98,9 +116,13 @@ class Shadowfall extends Phaser.Scene {
   dodge(){this.player.setVelocityX((this.player.flipX?-1:1)*350);this.invuln=this.time.now+350;this.player.setTint(0x67e8f9);this.time.delayedCall(200,()=>this.player?.clearTint())}
   interact(){const l=this.loot.find(x=>x.o.active&&Phaser.Math.Distance.Between(this.player.x,this.player.y,x.o.x,x.o.y)<65);if(l){l.o.destroy();this.loot=this.loot.filter(x=>x!==l);this.save.inv.push(l.name);this.say(`LOOT FOUND: ${l.name} (+${l.atk} ATK)`,2200);this.save.atk+=l.atk;persist(this.save);return}
     if(this.player.x>2050&&this.player.x<2290){this.save.checkpoint=true;persist(this.save);this.say("CHECKPOINT ATTUNED — GAME SAVED",2000)}else this.say("Nothing nearby to interact with.",900)}
-  equipBonus(){return 0}
+  equipBonus(){return Math.max(0,this.save.atk-10-(this.save.level-1)*2)}
   say(t:string,ms:number){this.message.setText(t).setY(this.scale.height-45).setVisible(true);this.time.delayedCall(ms,()=>this.message?.setVisible(false))}
-  togglePause(){this.paused=!this.paused;this.physics.world.isPaused=this.paused;if(this.paused){const w=this.scale.width,h=this.scale.height;const shade=this.add.rectangle(w/2,h/2,w,h,0x100d1c,.9).setScrollFactor(0).setDepth(50).setName("pauseShade");const title=this.add.text(w/2,h/2-45,"PAUSED",{fontFamily:"monospace",fontSize:"30px",color:"#fff"}).setOrigin(.5).setScrollFactor(0).setDepth(51).setName("pauseTitle");const b=this.add.text(w/2,h/2+10,"RESUME   •   SAVE   •   RESET SAVE",{fontFamily:"monospace",fontSize:"14px",color:"#c4b5fd",backgroundColor:"#33254f",padding:12}).setOrigin(.5).setScrollFactor(0).setDepth(51).setInteractive().setName("pauseButton");b.on("pointerdown",()=>{persist(this.save);this.children.list.filter(o=>["pauseShade","pauseTitle","pauseButton"].includes(o.name)).forEach(o=>o.destroy());this.paused=false;this.physics.world.isPaused=false})}else this.children.list.filter(o=>["pauseShade","pauseTitle","pauseButton"].includes(o.name)).forEach(o=>o.destroy())}
+  togglePause(){this.paused=!this.paused;this.physics.world.isPaused=this.paused;if(this.paused){const w=this.scale.width,h=this.scale.height;const shade=this.add.rectangle(w/2,h/2,w,h,0x100d1c,.9).setScrollFactor(0).setDepth(50).setName("pauseShade");const title=this.add.text(w/2,h/2-45,"PAUSED",{fontFamily:"monospace",fontSize:"30px",color:"#fff"}).setOrigin(.5).setScrollFactor(0).setDepth(51).setName("pauseTitle");const makeButton=(y:number,label:string,action:()=>void,name:string)=>{const b=this.add.text(w/2,y,label,{fontFamily:"monospace",fontSize:"14px",color:"#c4b5fd",backgroundColor:"#33254f",padding:12}).setOrigin(.5).setScrollFactor(0).setDepth(51).setInteractive().setName(name);b.on("pointerdown",action)};
+      const close=()=>{this.children.list.filter(o=>["pauseShade","pauseTitle","pauseResume","pauseSave","pauseReset"].includes(o.name)).forEach(o=>o.destroy());this.paused=false;this.physics.world.isPaused=false};
+      makeButton(h/2+5,"RESUME",close,"pauseResume");
+      makeButton(h/2+55,"SAVE GAME",()=>{persist(this.save);this.say("GAME SAVED",1200);close()},"pauseSave");
+      makeButton(h/2+105,"RESET SAVE",()=>{try{localStorage.removeItem(KEY)}catch{};this.save=fresh();persist(this.save);this.scene.restart()},"pauseReset")}else this.children.list.filter(o=>["pauseShade","pauseTitle","pauseButton"].includes(o.name)).forEach(o=>o.destroy())}
   touchControls(){const add=(x:number,y:number,label:string,key:keyof Shadowfall["touch"],color=0x34274e)=>{const c=this.add.circle(x,y,27,color,.9).setStrokeStyle(2,0xa78bfa).setScrollFactor(0).setDepth(40).setInteractive();this.add.text(x,y,label,{fontFamily:"monospace",fontSize:"12px",color:"#fff"}).setOrigin(.5).setScrollFactor(0).setDepth(41);const down=()=>{this.touch[key]=true;c.setFillStyle(0x6d28d9)};const up=()=>{this.touch[key]=false;c.setFillStyle(color)};c.on("pointerdown",down);c.on("pointerup",up);c.on("pointerout",up)};
     add(42,this.scale.height-75,"◀","left");add(104,this.scale.height-75,"▶","right");add(72,this.scale.height-132,"↑","jump");add(this.scale.width-165,this.scale.height-75,"ATK","attack",0x573047);add(this.scale.width-108,this.scale.height-125,"K","k");add(this.scale.width-55,this.scale.height-75,"L","l");add(this.scale.width-108,this.scale.height-35,"I","i");add(this.scale.width-218,this.scale.height-132,"DOD","dodge");add(this.scale.width-260,this.scale.height-72,"E","interact")}
   repositionTouch(){/* Reload after rotating if you need controls reflowed. */}
